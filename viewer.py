@@ -1,7 +1,9 @@
 import sqlite3
+from datetime import datetime
+
+import folium
 import pandas as pd
 import streamlit as st
-import folium
 from streamlit_folium import st_folium
 
 DB = "timeline.db"
@@ -20,18 +22,41 @@ COLORS = {
     "IN_FERRY": "darkgreen",
 }
 
+ICONS = {
+    "WALKING": "🚶",
+    "IN_PASSENGER_VEHICLE": "🚗",
+    "IN_VEHICLE": "🚙",
+    "IN_BUS": "🚌",
+    "CYCLING": "🚴",
+    "MOTORCYCLING": "🏍️",
+    "FLYING": "✈️",
+    "IN_TRAIN": "🚆",
+    "IN_SUBWAY": "🚇",
+    "IN_TRAM": "🚋",
+    "IN_FERRY": "⛴️",
+}
+
+
+def parse_time(s):
+    return datetime.fromisoformat(s)
+
+
+def duration_minutes(start, end):
+    return (parse_time(end) - parse_time(start)).total_seconds() / 60
+
+
 st.set_page_config(
     page_title="Google Timeline Explorer",
     layout="wide"
 )
 
-st.title("🗺 Google Timeline Explorer")
+st.title("🗺️ Google Timeline Explorer")
 
 conn = sqlite3.connect(DB)
 
-# -------------------------------------------------
-# Load available dates
-# -------------------------------------------------
+# --------------------------------------------------
+# Dates
+# --------------------------------------------------
 
 dates = pd.read_sql("""
 SELECT DISTINCT substr(start_time,1,10) AS d
@@ -39,34 +64,61 @@ FROM visits
 ORDER BY d DESC
 """, conn)
 
-selected = st.selectbox(
+selected_day = st.selectbox(
     "Choose a day",
     dates["d"].tolist()
 )
 
-# -------------------------------------------------
-# Load data
-# -------------------------------------------------
+# --------------------------------------------------
+# Read database
+# --------------------------------------------------
 
 visits = pd.read_sql("""
 SELECT *
 FROM visits
 WHERE substr(start_time,1,10)=?
 ORDER BY start_time
-""", conn, params=(selected,))
+""", conn, params=(selected_day,))
 
 activities = pd.read_sql("""
 SELECT *
 FROM activities
 WHERE substr(start_time,1,10)=?
 ORDER BY start_time
-""", conn, params=(selected,))
+""", conn, params=(selected_day,))
+
+# --------------------------------------------------
+# Activity filter
+# --------------------------------------------------
+
+activity_types = ["ALL"]
+
+if len(activities):
+    activity_types += sorted(
+        activities["activity_type"].unique().tolist()
+    )
+
+selected_activity = st.selectbox(
+    "Activity type",
+    activity_types
+)
+
+if selected_activity != "ALL":
+    activities = activities[
+        activities["activity_type"] == selected_activity
+    ]
 
 conn.close()
 
-# -------------------------------------------------
-# Map center
-# -------------------------------------------------
+# --------------------------------------------------
+# Statistics
+# --------------------------------------------------
+
+total_distance = activities["distance"].sum() / 1000
+
+# --------------------------------------------------
+# Map centre
+# --------------------------------------------------
 
 if len(visits):
 
@@ -86,36 +138,66 @@ else:
 
     center = [0, 0]
 
-# -------------------------------------------------
-# Create map
-# -------------------------------------------------
-
 m = folium.Map(
     location=center,
     zoom_start=13
 )
 
+# --------------------------------------------------
 # Visits
+# --------------------------------------------------
 
 for _, v in visits.iterrows():
+
+    minutes = duration_minutes(
+        v.start_time,
+        v.end_time
+    )
 
     folium.Marker(
         [v.latitude, v.longitude],
         popup=f"""
-        Visit
+Visit
 
-        {v.start_time}
+Start:
+{v.start_time}
 
-        {v.end_time}
-        """,
-        icon=folium.Icon(color="red", icon="home")
+End:
+{v.end_time}
+
+Duration:
+{minutes:.0f} min
+""",
+        icon=folium.Icon(
+            color="red",
+            icon="home"
+        )
     ).add_to(m)
 
+# --------------------------------------------------
 # Activities
+# --------------------------------------------------
 
 for _, a in activities.iterrows():
 
-    color = COLORS.get(a.activity_type, "gray")
+    color = COLORS.get(
+        a.activity_type,
+        "gray"
+    )
+
+    minutes = duration_minutes(
+        a.start_time,
+        a.end_time
+    )
+
+    speed = 0
+
+    if minutes > 0:
+        speed = (
+            a.distance / 1000
+        ) / (
+            minutes / 60
+        )
 
     folium.PolyLine(
         [
@@ -124,28 +206,37 @@ for _, a in activities.iterrows():
         ],
         color=color,
         weight=5,
-        tooltip=f"{a.activity_type} ({int(a.distance)} m)"
+        tooltip=(
+            f"{a.activity_type}\n"
+            f"{a.distance:.0f} m\n"
+            f"{minutes:.0f} min\n"
+            f"{speed:.1f} km/h"
+        )
     ).add_to(m)
 
-# -------------------------------------------------
+# --------------------------------------------------
 # Layout
-# -------------------------------------------------
+# --------------------------------------------------
 
 left, right = st.columns([1, 2])
 
-# =================================================
+# ==================================================
 # LEFT PANEL
-# =================================================
+# ==================================================
 
 with left:
 
     st.subheader("📊 Summary")
 
-    total_distance = activities["distance"].sum() / 1000
-
     st.metric("Visits", len(visits))
     st.metric("Activities", len(activities))
     st.metric("Distance", f"{total_distance:.1f} km")
+
+    if len(activities):
+        st.metric(
+            "Average trip",
+            f"{total_distance / len(activities):.1f} km"
+        )
 
     st.divider()
 
@@ -157,47 +248,61 @@ with left:
 
     for _, v in visits.iterrows():
 
+        minutes = duration_minutes(
+            v.start_time,
+            v.end_time
+        )
+
         events.append({
             "time": v.start_time,
-            "text": "📍 Visit"
+            "text": f"📍 Visit ({minutes:.0f} min)"
         })
 
     # Activities
 
-    ICONS = {
-        "WALKING": "🚶",
-        "IN_PASSENGER_VEHICLE": "🚗",
-        "IN_VEHICLE": "🚙",
-        "IN_BUS": "🚌",
-        "CYCLING": "🚴",
-        "MOTORCYCLING": "🏍",
-        "FLYING": "✈️",
-        "IN_TRAIN": "🚆",
-        "IN_SUBWAY": "🚇",
-        "IN_TRAM": "🚋",
-        "IN_FERRY": "⛴️"
-    }
-
     for _, a in activities.iterrows():
 
-        icon = ICONS.get(a.activity_type, "➡️")
+        minutes = duration_minutes(
+            a.start_time,
+            a.end_time
+        )
+
+        speed = 0
+
+        if minutes > 0:
+            speed = (
+                a.distance / 1000
+            ) / (
+                minutes / 60
+            )
+
+        icon = ICONS.get(
+            a.activity_type,
+            "➡️"
+        )
 
         events.append({
             "time": a.start_time,
-            "text": f"{icon} {a.activity_type} ({int(a.distance)} m)"
+            "text":
+                f"{icon} {a.activity_type}\n"
+                f"{a.distance:.0f} m   "
+                f"{minutes:.0f} min   "
+                f"{speed:.1f} km/h"
         })
 
-    events.sort(key=lambda x: x["time"])
+    events.sort(
+        key=lambda x: x["time"]
+    )
 
     for e in events:
 
-        t = e["time"][11:16]
+        st.write(
+            f"**{e['time'][11:16]}**  {e['text']}"
+        )
 
-        st.write(f"**{t}** &nbsp;&nbsp; {e['text']}")
-
-# =================================================
+# ==================================================
 # RIGHT PANEL
-# =================================================
+# ==================================================
 
 with right:
 
