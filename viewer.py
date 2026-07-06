@@ -4,6 +4,20 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 
+COLORS = {
+    "WALKING": "green",
+    "IN_PASSENGER_VEHICLE": "blue",
+    "IN_VEHICLE": "blue",
+    "IN_BUS": "orange",
+    "CYCLING": "purple",
+    "MOTORCYCLING": "black",
+    "FLYING": "red",
+    "IN_TRAIN": "darkred",
+    "IN_SUBWAY": "cadetblue",
+    "IN_TRAM": "pink",
+    "IN_FERRY": "darkgreen",
+}
+
 DB = "timeline.db"
 
 st.set_page_config(layout="wide")
@@ -70,14 +84,18 @@ for _,v in visits.iterrows():
         popup=v.start_time
     ).add_to(m)
 
-for _,a in activities.iterrows():
+for _, a in activities.iterrows():
+
+    color = COLORS.get(a.activity_type, "gray")
 
     folium.PolyLine(
         [
-            [a.start_lat,a.start_lon],
-            [a.end_lat,a.end_lon]
+            [a.start_lat, a.start_lon],
+            [a.end_lat, a.end_lon]
         ],
-        tooltip=a.activity_type
+        color=color,
+        weight=5,
+        tooltip=f"{a.activity_type} ({int(a.distance)} m)"
     ).add_to(m)
 
 st_folium(m,width=1000,height=700)
