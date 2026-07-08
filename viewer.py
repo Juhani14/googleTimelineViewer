@@ -64,10 +64,43 @@ FROM visits
 ORDER BY d DESC
 """, conn)
 
-selected_day = st.selectbox(
-    "Choose a day",
-    dates["d"].tolist()
+date_list = dates["d"].tolist()
+
+if "day_index" not in st.session_state:
+    st.session_state.day_index = 0
+    
+c1, c2, c3 = st.columns([1,4,1])
+
+with c1:
+    if st.button("⬅ Previous"):
+        if st.session_state.day_index < len(date_list)-1:
+            st.session_state.day_index += 1
+
+with c2:
+    st.markdown(
+        f"## {date_list[st.session_state.day_index]}"
+    )
+
+with c3:
+    if st.button("Next ➡"):
+        if st.session_state.day_index > 0:
+            st.session_state.day_index -= 1
+
+selected_day = date_list[
+    st.session_state.day_index
+]
+
+
+picked = st.date_input(
+    "Jump to date",
+    value=datetime.fromisoformat(selected_day).date()
 )
+
+picked = picked.isoformat()
+
+if picked in date_list:
+    st.session_state.day_index = date_list.index(picked)
+    selected_day = picked    
 
 # --------------------------------------------------
 # Read database
